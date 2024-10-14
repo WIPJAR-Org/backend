@@ -82,3 +82,11 @@ async def extract_text(background_tasks: BackgroundTasks, file: UploadFile = Fil
         print(e)
         return PlainTextResponse(content=f"An error occurred: {str(e)}", status_code=500)
     
+
+@app.get("/wipplaces")
+def get_places():
+    places = azure_manager.get_places()
+    if places is not None:
+        return {"success": True, "places": places}
+    else :
+        return {"success": False}
