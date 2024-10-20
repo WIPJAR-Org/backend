@@ -1,6 +1,10 @@
+import json
 from mimetypes import guess_type
+import tiktoken
 from openai import AzureOpenAI
 from src.client_models.gpt4_clients import BaseGPTClient
+
+
 
 pdf_prompts = [
     "In a hearing meeting of a municipality's Land Use, Zoning, Urban development related meetings, there would be multiple issues adressed. The minutes of the meetings are recorded. The minutes could be summarizing appeals done in the meeting, their outcomes of approvals or denials, or some other initiatives taken by the city. I need you to process the following text from the minutes of the meeting and return me a structured data with rows corresponding to each item discussed in the meeting. ",
@@ -89,3 +93,12 @@ class GPT4OClient(BaseGPTClient):
             "response" : description.strip() 
         }
         return response 
+    
+    def num_tokens_content(self, content, model="gpt-4o-mini"):
+        """Return the number of tokens used by a list of messages."""
+        try:
+            encoding = tiktoken.encoding_for_model(model)
+        except KeyError:
+            print("Warning: model not found. Using cl100k_base encoding.")
+            encoding = tiktoken.get_encoding("cl100k_base")
+        return len(encoding.encode(content))

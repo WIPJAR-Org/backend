@@ -1,5 +1,8 @@
 import os
 import tempfile
+from uuid import uuid4
+import asyncio
+import aiofiles
 from dotenv import load_dotenv
 load_dotenv()
 
@@ -16,11 +19,33 @@ from src.store.cache import (
     SimpleCache, CacheData, background_clear_cache
 )
 
-
-azure_manager = AzureManager();
-PDF_CACHE = SimpleCache()
-
 app = FastAPI()
+
+azure_manager = AzureManager()
+PDF_CACHE = SimpleCache()
+CONVERSATION_CACHE = {}
+ENCOUNTER_SUMMARY_CACHE = {}
+INDEX_CACHE = {}
+
+def get_index_cache():
+    return INDEX_CACHE
+
+@app.on_event("startup")
+async def startup():
+    print("Startup Activities")
+    '''
+    Load index
+    '''
+    global INDEX_CACHE 
+    INDEX_CACHE = azure_manager.get_full_index()
+
+
+def get_conversation_cache():
+    return CONVERSATION_CACHE
+
+def get_encounter_summary_cache():
+    return ENCOUNTER_SUMMARY_CACHE
+
 
 app.add_middleware(
     CORSMiddleware,
@@ -90,3 +115,111 @@ def get_places():
         return {"success": True, "places": places}
     else :
         return {"success": False}
+
+@app.post("/wipindex")
+async def create_index(place:str = Form(...), department:str = Form(...), date:str = Form(...)):
+    response = await azure_manager.write_pdf_as_index(place, department, date, {})
+    return response
+
+@app.post("/wipindex/all")
+async def create_index(place_name:str = Form(...)):
+    places = azure_manager.get_places()
+    departments = []
+    task_statuses = {}
+
+    for place in places:
+        if place["name"] == place_name:
+            departments = place["info"]["departments"]
+            break
+    
+    tasks = []
+
+    for department in departments:
+        dept = department["name"]
+        blobs = azure_manager.get_directories(starts_with=f'{place_name}/{dept}')
+        for blob_name in blobs:
+            if '.json' in blob_name:
+                continue
+            filename = blob_name.split('/')[2]
+            datestr = filename.split('_')[0]
+
+            tasks.append(azure_manager.write_pdf_as_index(place_name, dept, datestr, task_statuses))
+            # Start the task in a new thread
+            # thread = threading.Thread(target=azure_manager.write_pdf_as_index, args=(place_name, dept, datestr, task_statuses))
+            # thread.start()
+    await asyncio.gather(*tasks)
+
+    return task_statuses
+
+
+@app.get("/cache")
+async def get_cache(background_tasks: BackgroundTasks, key:str = Form(...)):
+    value = PDF_CACHE.get(key)
+    background_tasks.add_task(background_clear_cache, PDF_CACHE)
+    return {"key": key, "value": value}
+
+@app.post("/cache/{key}")
+async def set_cache(key: str, data: CacheData, background_tasks: BackgroundTasks):
+    PDF_CACHE.set(key, data.value, data.ttl_seconds)
+    background_tasks.add_task(background_clear_cache, PDF_CACHE)
+    return {"message": "Cache set successfully"}
+
+
+def load_file_task(batch_id: str, blob_batch):
+    # Simulate a long-running task
+    data = {}
+    data["key"] = batch_id
+    data["status"] = "LOADING"
+    PDF_CACHE.set(batch_id, data, 60 * 60 * 24) 
+    text = ''
+    for blob in blob_batch:
+        print(blob)
+        try:
+            text += azure_manager.read_txt_pdf_blob(blob, 'wipjar-minutes-index')
+        except Exception as e:
+            print(e, blob)
+        text += '\n'
+    data["text"] = text
+    data["status"] = "LOADED"
+    PDF_CACHE.set(batch_id, data, 60 * 60 * 24) 
+
+def load_files_in_background(background_tasks: BackgroundTasks, blob_batches):
+    batch_ids = []
+    for blob_batch in blob_batches:
+        batch_id = str(uuid4()) 
+        background_tasks.add_task(load_file_task, batch_id, blob_batch)
+        batch_ids.append(batch_id)
+    return batch_ids
+
+task_statuses = {}
+
+async def write_file_task(task_id: str, filename: str, content: str):
+    try:
+        # Simulate a long-running task
+        await asyncio.sleep(10)
+        # Write the file
+        async with aiofiles.open(filename, 'w') as f:
+            await f.write(content)
+        # Update task status
+        task_statuses[task_id] = f"File {filename} has been written."
+    except Exception as e:
+        task_statuses[task_id] = f"Error: {str(e)}"
+
+@app.post("/schedule-task")
+async def schedule_task(filename: str, content: str):
+    task_id = str(uuid4())
+    task_statuses[task_id] = "Task is pending..."
+    
+    # Start the task in a new thread
+    asyncio.create_task(write_file_task(task_id, filename, content))
+    
+    return {"message": "Task scheduled successfully", "task_id": task_id}
+
+@app.get("/task-status/{task_id}")
+async def get_task_status(task_id: str):
+    status = task_statuses.get(task_id, "Task not found")
+    return {"task_id": task_id, "status": status}
+
+@app.get("/tasks")
+async def get_tasks():
+    return task_statuses
