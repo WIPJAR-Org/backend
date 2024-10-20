@@ -1,6 +1,7 @@
 """
 This module handles interactions with Azure Blob Storage.
 """
+import logging
 import base64
 import json
 import random
@@ -83,12 +84,12 @@ class BlobStorageClient:
                         "status": test_data["status"]
                     }
                 except json.JSONDecodeError as e:
-                    print.error(f"Error parsing file content: {blob_name}, {e}")
-                    print.debug(filecontent)
+                    logging.error(f"Error parsing file content: {blob_name}, {e}")
+                    logging.debug(filecontent)
         except ResourceNotFoundError as e:
-            print.error(f"Container '{container_name}' not found: {e}")
+            logging.error(f"Container '{container_name}' not found: {e}")
         except Exception as e:
-            print.error(f"An unexpected error occurred: {e}")
+            logging.error(f"An unexpected error occurred: {e}")
         return index_content
 
     def read_directories(self, container_name, starts_with):
