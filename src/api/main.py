@@ -2,6 +2,8 @@ import os
 import tempfile
 from uuid import uuid4
 import asyncio
+import re 
+import json
 import aiofiles
 from dotenv import load_dotenv
 load_dotenv()
@@ -223,3 +225,52 @@ async def get_task_status(task_id: str):
 @app.get("/tasks")
 async def get_tasks():
     return task_statuses
+
+@app.post("/chat")
+async def ask(background_tasks: BackgroundTasks, key:str = Form(...), question:str = Form(...), is_table:bool = Form(...)):
+    file_data = PDF_CACHE.get(key)
+    text = file_data["text"]
+    # print(key, is_table, question, text)
+    print(question)
+    response = azure_manager.get_answer_from_pdf(text, question, is_table)
+    background_tasks.add_task(background_clear_cache, PDF_CACHE)
+    return response
+    # return f"Received {key} and {is_table}"
+
+
+@app.post("/chat_explore", response_class=JSONResponse)
+def explore_chat(background_tasks: BackgroundTasks, options = File(...)):
+    print(options)
+    blobs = []
+    prefixes = []
+    selected_options = json.loads(options)
+    for place in selected_options["places"]:
+        for department in selected_options["departments"]:
+            prefixes.append(f'{place}/{department}/{selected_options["time"]}')
+    for prefix in prefixes:
+        blobs.extend(azure_manager.get_directories(prefix, 'wipjar-minutes-index'))
+    
+    blob_batches = []
+    print(blobs)
+    blobs_to_process = []
+    total_tokens = 0
+    for blob in blobs:
+        match = re.search(r'(.*)_(\d+)\.txt$', blob)
+        if match:
+            tokens = int(match.group(2))
+            total_tokens += tokens
+            print(total_tokens)
+            blobs_to_process.append(blob)
+            if total_tokens + tokens > 100000:
+                print('--->', total_tokens)
+                blob_batches.append(blobs_to_process)
+                blobs_to_process = []
+                total_tokens = 0
+            else :
+                total_tokens += tokens
+
+    if blobs_to_process:
+        blob_batches.append(blobs_to_process)
+    print(blob_batches) 
+    batch_ids = load_files_in_background(background_tasks, blob_batches)
+    return {"success": True, "data": batch_ids}

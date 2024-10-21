@@ -92,9 +92,13 @@ class AzureManager:
             task_statuses[task_id] = {"failed": True, "message": str(e)} 
             return {"failed": True, "message": str(e)}
 
+    # revisit this method and add starts_with parameter
     def get_departments(self):
         return self.blobstorage_client.read_directories('wipjar-pdfs')
 
 
     def get_directories(self, starts_with, container_name = 'wipjar-pdfs'):
         return self.blobstorage_client.read_directories(container_name, starts_with)
+
+    def get_answer_from_pdf(self, text: str, question: str, json_response: bool):
+        return self.chat_client.converse(text, question, json_response)

@@ -102,3 +102,80 @@ class GPT4OClient(BaseGPTClient):
             print("Warning: model not found. Using cl100k_base encoding.")
             encoding = tiktoken.get_encoding("cl100k_base")
         return len(encoding.encode(content))
+
+    # find out if the first message_ was intended or can be removed
+    def converse(self, text, question, json_response) -> str:
+        """
+        Converse with the GPT-4O model using the provided text and question.
+
+        Args:
+            text (str): The text to analyze.
+            question (str): The question to ask.
+            json_response (bool): Whether to format the response as JSON.
+
+        Returns:
+            dict: The response from the GPT-4O model.
+        """
+        messages_ =[
+            {
+                "role": "system",
+                "content": "You are a Data Analyst working a city municipality. The municipality records minutes of its meetings, that correspond to many different departments such as Planning Commission Zoning Department, Land Use, Community Development,Urban Planning etc",
+            },
+            {
+                "role": "user",
+                "content": f"{' '.join(chat_pdf_prompts)} {json_message if json_response else ''}",
+            }, 
+            {
+                "role": "user",
+                "content": text,
+            }, 
+            {
+                "role": "user",
+                "content": question,
+            },            
+        ]        
+        messages = [
+            {
+            "role": "system",
+            "content": "You are an AI assistant analyzing transcripts from city municipality meetings. These transcripts cover various departments such as Planning Commission, Zoning Department, Land Use, Community Development, and Urban Planning. Your task is to understand the content, identify people who spoke and understand what they said, regarding key points, identify important decisions, and answer questions about the meeting content."
+            },
+            {
+            "role": "user",
+            "content": f"Here is a transcript from a recent municipality meeting:\n\n{text}\n\nPlease answer the following question."
+            },
+        ]
+        if json_response:
+            messages.append({
+                "role": "user",
+                "content": "Make sure your response is strictly a json object that looks like {'data': []}and that I can display in React antd Table component!",
+            })
+            messages.append({
+                "role": "user",
+                "content": question,
+            }
+        )
+        try:
+            if json_response :
+                response = self.chat_completion(
+                    messages=messages,
+                    max_tokens=10000,
+                    response_format={"type": "json_object"}
+                )
+            else:
+                response = self.chat_completion(
+                    messages=messages,
+                    max_tokens=10000,
+                    response_format={"type": "text"}
+                )                
+            print(f'Tokens : {response.usage.prompt_tokens}')
+        except Exception as e:
+            raise Exception("Error fetching response from GPT") from e
+         
+        description = response.choices[0].message.content
+        if description is None or description.strip() == "":
+            description = "I apologize, but I am having difficulty providing a detailed description of this image. The image quality or content may be challenging for me to interpret accurately. Please provide additional guidance or consider uploading a clearer image if possible."
+        response = {
+            "usage": response.usage,
+            "response" : description.strip() 
+        }
+        return response 
